@@ -97,9 +97,13 @@ const BrightSoftwareHost = () => {
   }
 };
 
-    recognition.onend = () => {
-      if (isActiveRef.current && !isAISpeakingRef.current) safeStart();
-    };
+  recognition.onend = () => {
+  // Only restart if the app is active AND we aren't currently 
+  // processing a request or speaking a response.
+  if (isActiveRef.current && !isAISpeakingRef.current) {
+    safeStart();
+  }
+};
 
     recognition.onerror = () => { if (isActiveRef.current) safeStart(); };
     recognitionRef.current = recognition;
@@ -118,8 +122,11 @@ const BrightSoftwareHost = () => {
       // Optional: video.currentTime = 0; // Reset to beginning if desired
     });
   };
- const handleTurn = async (text) => {
+  const handleTurn = async (text) => {
+  // 1. Immediately block recognition and change status
+  isAISpeakingRef.current = true; 
   recognitionRef.current?.stop();
+  
   setStatus('PROCESSING...');
   setInterimText('');
 
@@ -157,7 +164,6 @@ const BrightSoftwareHost = () => {
       });
 
       const data = await res.json();
-
       botMessage.content = data.response || "";
       botMessage.images = data.images || [];
       botMessage.videos = data.videos || [];
@@ -166,76 +172,75 @@ const BrightSoftwareHost = () => {
 
     setChat(prev => [...prev, botMessage]);
 
-    // Speak only text
+    // 2. Speak the response. 
+    // The 'speak' function will set isAISpeakingRef to false ONLY when finished.
     if (botMessage.content) {
       speak(botMessage.content);
     } else {
-      setStatus('LISTENING');
+      // If no text, unlock and resume listening
+      isAISpeakingRef.current = false;
+      setStatus(isConversingRef.current ? 'LISTENING' : 'STANDBY (Say Namaste)');
       setTimeout(safeStart, 300);
     }
 
   } catch (err) {
+    console.error(err);
     speak("Connection interrupted.");
   }
 };
   const speak = (text) => {
-    // 1. Force stop any current speech to clear the browser buffer
-    window.speechSynthesis.cancel();
-    
-    isAISpeakingRef.current = true;
-    recognitionRef.current?.stop(); 
-    setStatus('Speaking...');
+  window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    // 2. CRITICAL FIX: Attach to window to prevent Garbage Collection "breaking"
-    // This stops the browser from deleting the voice object while it is talking.
-    window.activeUtterance = utterance;
+  isAISpeakingRef.current = true;
+  recognitionRef.current?.stop();
+  setStatus('Speaking...');
 
-    const voices = synthRef.getVoices();
-    
-    // 3. VOICE SELECTION: Avoid "Online" voices if they are unstable. 
-    // We prioritize local system voices which don't require internet.
-    const selectedVoice = voices.find(v => v.name === 'Google US English' && !v.name.includes('Online')) || 
-                         voices.find(v => v.name.includes('Microsoft Aria')) ||
-                         voices.find(v => v.lang === 'en-US' && v.name.includes('Female')) ||
-                         voices[0];
+  const voices = synthRef.getVoices();
 
-    if (selectedVoice) utterance.voice = selectedVoice;
+  const selectedVoice =
+    voices.find(v => v.name === 'Google US English' && !v.name.includes('Online')) ||
+    voices.find(v => v.name.includes('Microsoft Aria')) ||
+    voices[0];
 
-    utterance.pitch = 1.0;
-    utterance.rate = 1.0; 
-    utterance.volume = 1.0;
+  // 🔥 Split into chunks
+  const chunks = text.match(/.{1,120}(\s|$)/g); // 120 chars per chunk
 
-    utterance.onend = () => {
+  let index = 0;
+
+  const speakChunk = () => {
+    if (index >= chunks.length) {
       isAISpeakingRef.current = false;
-      window.activeUtterance = null; // Clean up
       if (isActiveRef.current) {
         setStatus(isConversingRef.current ? 'LISTENING' : 'STANDBY (Say Namaste)');
         setTimeout(safeStart, 300);
       }
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(chunks[index]);
+
+    window.activeUtterance = utterance;
+
+    if (selectedVoice) utterance.voice = selectedVoice;
+
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    utterance.onend = () => {
+      index++;
+      speakChunk(); // 🔁 speak next chunk
     };
 
-    utterance.onerror = (e) => {
-      console.error("Speech Error:", e);
-      isAISpeakingRef.current = false;
-      window.activeUtterance = null;
-      safeStart();
+    utterance.onerror = () => {
+      index++;
+      speakChunk();
     };
 
-    // 4. THE HEARTBEAT TRICK: 
-    // Some browsers "pause" speech after 15 seconds. This keeps it alive.
-    const resumeSpeech = () => {
-        if (isAISpeakingRef.current && window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause();
-            window.speechSynthesis.resume();
-            setTimeout(resumeSpeech, 10000);
-        }
-    };
-    setTimeout(resumeSpeech, 10000);
-
-    window.speechSynthesis.speak(utterance);
+    speechSynthesis.speak(utterance);
   };
+
+  speakChunk();
+};
 
  const wakeSystem = () => {
     setIsWaked(true);
@@ -363,21 +368,26 @@ const BrightSoftwareHost = () => {
 
               {/* VIDEOS */}
               {msg.videos && msg.videos.length > 0 && (
-                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {msg.videos.map((vid, idx) => (
-                    <video
+              <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {msg.videos.map((vid, idx) => (
+                  vid.type === "youtube" ? (
+                    <iframe
                       key={idx}
-                      controls
-                      style={{
-                        width: '100%',
-                        borderRadius: '10px'
-                      }}
-                    >
+                      src={vid.url}
+                      style={{ width: '100%', height: '300px', borderRadius: '10px' }}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      title="YouTube video"
+                    />
+                  ) : (
+                    <video key={idx} controls style={{ width: '100%', borderRadius: '10px' }}>
                       <source src={vid.url} type="video/mp4" />
                     </video>
-                  ))}
-                </div>
-              )}
+                  )
+                ))}
+              </div>
+            )}
 
               {/* LINKS */}
               {msg.links && msg.links.length > 0 && (

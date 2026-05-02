@@ -217,23 +217,23 @@ function convertMedia(text) {
  
     /* YOUTUBE */
  
-    if (url.includes("youtube.com/watch") || url.includes("youtu.be/")) {
- 
-      let videoId = "";
- 
-      if (url.includes("watch?v=")) {
-        videoId = url.split("watch?v=")[1].split("&")[0];
-      }
- 
-      if (url.includes("youtu.be/")) {
-        videoId = url.split("youtu.be/")[1].split("?")[0];
-      }
- 
-      if (videoId) {
-        return `<iframe src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen></iframe>`;
-      }
- 
-    }
+if (url.includes("youtube.com/watch") || url.includes("youtu.be/")) {
+  let videoId = "";
+
+  if (url.includes("watch?v=")) {
+    videoId = url.split("watch?v=")[1].split("&")[0];
+  }
+
+  if (url.includes("youtu.be/")) {
+    videoId = url.split("youtu.be/")[1].split("?")[0];
+  }
+
+  if (videoId) {
+    videos.push({ url: `https://www.youtube.com/embed/${videoId}`, type: "youtube" });
+  }
+
+  return ""; // remove from text
+}
  
     /* NORMAL LINK */
  
