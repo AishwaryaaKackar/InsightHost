@@ -217,23 +217,28 @@ function convertMedia(text) {
  
     /* YOUTUBE */
  
-if (url.includes("youtube.com/watch") || url.includes("youtu.be/")) {
-  let videoId = "";
-
-  if (url.includes("watch?v=")) {
-    videoId = url.split("watch?v=")[1].split("&")[0];
-  }
-
-  if (url.includes("youtu.be/")) {
-    videoId = url.split("youtu.be/")[1].split("?")[0];
-  }
-
-  if (videoId) {
-    videos.push({ url: `https://www.youtube.com/embed/${videoId}`, type: "youtube" });
-  }
-
-  return ""; // remove from text
-}
+    if (url.includes("youtube.com/watch") || url.includes("youtu.be/")) {
+ 
+      let videoId = "";
+ 
+      if (url.includes("watch?v=")) {
+        videoId = url.split("watch?v=")[1].split("&")[0];
+      }
+ 
+      if (url.includes("youtu.be/")) {
+        videoId = url.split("youtu.be/")[1].split("?")[0];
+      }
+ 
+      if (videoId) {
+        return `<iframe width="560" height="315"
+          src="https://www.youtube.com/embed/${videoId}"
+          frameborder="0"
+          allowfullscreen>
+        </iframe>`;
+      }
+ 
+      return url;
+    }
  
     /* NORMAL LINK */
  
@@ -299,9 +304,8 @@ app.post("/extractRAG", async (req, res) => {
         }
  
         return `[Source ${i+1}]
-    ${d.pageContent}
- 
-    ${media}`
+        ${d.pageContent}
+        ${media}`
  
       })
       .join("\n\n")
@@ -333,6 +337,26 @@ cleanText = cleanText.replace(/\n\s*\n/g,'\n')
 cleanText = cleanText.trim()
  
 let answer = convertMedia(cleanText)
+// extract important words from the answer
+const answerKeywords = cleanText
+  .toLowerCase()
+  .replace(/[^\w\s]/g, "")
+  .split(" ")
+  .filter(w => w.length > 3)
+ 
+// 🚨 If Gemini says no info → remove media
+if (cleanText.toLowerCase().includes("don't have enough information")) {
+ 
+  console.log("⚠️ No relevant answer → clearing media")
+ 
+  return res.json({
+    response: answer,
+    images: [],
+    videos: [],
+    links: []
+  })
+ 
+}
  
     /* Step 6: Unique Sources */
  
@@ -347,7 +371,13 @@ let links = []
  
 rankedDocs.forEach(d => {
  
-  if (d.metadata?.image_url) {
+  const text = d.pageContent.toLowerCase()
+ 
+  const relevant = answerKeywords.some(k => text.includes(k))
+ 
+  if (!relevant) return
+ 
+  if (d.metadata?.image_url && d.metadata.image_url.startsWith("http")) {
     images.push({ url: d.metadata.image_url })
   }
  
@@ -356,10 +386,25 @@ rankedDocs.forEach(d => {
   }
  
   if (d.metadata?.links) {
+ 
+  const text = d.pageContent.toLowerCase()
+ 
+  // extract meaningful keywords from question
+  const keywords = question
+    .toLowerCase()
+    .replace(/[^\w\s]/g,"")
+    .split(" ")
+    .filter(w => w.length > 3)
+ 
+  const match = keywords.some(k => text.includes(k))
+ 
+  if (match) {
     d.metadata.links.forEach(link => {
       links.push({ url: link })
     })
   }
+ 
+}
  
 })
  
@@ -400,4 +445,4 @@ async function startServer() {
  
 }
  
-startServer();
+startServer();  
