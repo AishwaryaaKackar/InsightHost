@@ -333,6 +333,67 @@ Answer:
 const response = await invokeWithRetry(llm, prompt);
  
 let cleanText = response?.content || ""
+// // -----------------------------
+// // AUTO DETECT MEDIA FROM TEXT
+// // -----------------------------
+
+// const urlRegex = /(https?:\/\/[^\s]+)/g
+// const foundUrls = cleanText.match(urlRegex) || []
+
+// foundUrls.forEach(url => {
+
+//   if (url.includes("youtube.com") || url.includes("youtu.be")) {
+
+//     let videoUrl = url
+
+//     if (url.includes("watch?v=")) {
+//       const id = url.split("watch?v=")[1].split("&")[0]
+//       videoUrl = `https://www.youtube.com/embed/${id}`
+//     }
+
+//     if (url.includes("youtu.be/")) {
+//       const id = url.split("youtu.be/")[1].split("?")[0]
+//       videoUrl = `https://www.youtube.com/embed/${id}`
+//     }
+
+//     videos.push({
+//       url: videoUrl,
+//       type: "youtube"
+//     })
+//   }
+
+//   else if (url.match(/\.(mp4|webm|ogg)$/i)) {
+//     videos.push({
+//       url: url,
+//       type: "file"
+//     })
+//   }
+
+//   else if (url.match(/\.(jpg|jpeg|png|webp)$/i)) {
+//     images.push(url)
+//   }
+
+//   else {
+//     links.push(url)
+//   }
+
+// })
+
+// remove iframe html from AI text
+cleanText = cleanText.replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+
+// remove video html if any
+cleanText = cleanText.replace(/<video[\s\S]*?<\/video>/gi, "")
+
+// remove standalone iframe tags
+cleanText = cleanText.replace(/<iframe[^>]*>/gi, "")
+
+// trim extra spaces
+cleanText = cleanText.trim()
+const lowerAnswer = cleanText.toLowerCase()
+
+cleanText = cleanText.replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+cleanText = cleanText.replace(/<video[\s\S]*?<\/video>/gi, "")
  
 cleanText = cleanText.replace(/\[Source\s*\d+\]/gi,'')
 cleanText = cleanText.replace(/\*/g,'')
@@ -387,6 +448,53 @@ let images = []
 let videos = []
 let links = []
 
+// -----------------------------
+// AUTO DETECT MEDIA FROM TEXT
+// -----------------------------
+
+const urlRegex = /(https?:\/\/[^\s]+)/g
+const foundUrls = cleanText.match(urlRegex) || []
+
+foundUrls.forEach(url => {
+
+  if (url.includes("youtube.com") || url.includes("youtu.be")) {
+
+    let videoUrl = url
+
+    if (url.includes("watch?v=")) {
+      const id = url.split("watch?v=")[1].split("&")[0]
+      videoUrl = `https://www.youtube.com/embed/${id}`
+    }
+
+    if (url.includes("youtu.be/")) {
+      const id = url.split("youtu.be/")[1].split("?")[0]
+      videoUrl = `https://www.youtube.com/embed/${id}`
+    }
+
+    videos.push({
+      url: videoUrl,
+      type: "youtube"
+    })
+
+  } else if (url.match(/\.(mp4|webm|ogg)$/i)) {
+
+    videos.push({
+      url: url,
+      type: "file"
+    })
+
+  } else if (url.match(/\.(jpg|jpeg|png|webp)$/i)) {
+
+    images.push({ url })
+
+  } else {
+
+    links.push({ url })
+
+  }
+
+})
+
 
 
   const questionWords = question
@@ -421,7 +529,27 @@ personMatch = nameParts.every(n => text.includes(n))
   }
 
   if (d.metadata?.video_url) {
-    videos.push({ url: d.metadata.video_url })
+
+    let videoUrl = d.metadata.video_url
+    let type = "file"
+
+    // Convert YouTube watch links → embed links
+    if (videoUrl.includes("youtube.com/watch")) {
+      const id = videoUrl.split("watch?v=")[1].split("&")[0]
+      videoUrl = `https://www.youtube.com/embed/${id}`
+      type = "youtube"
+    }
+
+    if (videoUrl.includes("youtu.be/")) {
+      const id = videoUrl.split("youtu.be/")[1].split("?")[0]
+      videoUrl = `https://www.youtube.com/embed/${id}`
+      type = "youtube"
+    }
+
+    videos.push({
+      url: videoUrl,
+      type: type
+    })
   }
 
   if (d.metadata?.links) {
