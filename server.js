@@ -260,55 +260,58 @@ app.post("/extractRAG", async (req, res) => {
  
     /* Step 1: Semantic Retrieval (MMR) */
  
-    const docs = await vectorStore.maxMarginalRelevanceSearch(
-      question,
-      {
-        k: 12,
-        fetchK: 25,
-        lambda: 0.7
-      }
-    );
+    const isListQuery =
+    /list|all|show|who are|names|directors|members/i.test(question)
+
+  const docs = await vectorStore.maxMarginalRelevanceSearch(
+    question,
+    {
+      k: isListQuery ? 30 : 12,
+      fetchK: isListQuery ? 50 : 25,
+      lambda: 0.7
+    }
+  )
  
     /* Step 2: Hybrid Keyword Reranking */
  
  
     const rankedDocs = docs
-      .map(doc => ({
-        doc,
-        score: keywordScore(doc.pageContent, question)
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6)
-      .map(d => d.doc);
+    .map(doc => ({
+      doc,
+      score: keywordScore(doc.pageContent, question)
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, isListQuery ? 20 : 6)
+    .map(d => d.doc);
  
  
     /* Step 3: Build Context */
  
-    const context = rankedDocs
-      .map((d, i) => {
+    // const context = rankedDocs
+    //   .map((d, i) => {
  
-        let media = ""
+    //     let media = ""
  
-        if (d.metadata?.image_url) {
-          media += "\n" + d.metadata.image_url
-        }
+    //     if (d.metadata?.image_url) {
+    //       media += "\n" + d.metadata.image_url
+    //     }
  
-        if (d.metadata?.video_url) {
-          media += "\n" + d.metadata.video_url
-        }
+    //     if (d.metadata?.video_url) {
+    //       media += "\n" + d.metadata.video_url
+    //     }
  
-        if (d.metadata?.links) {
-          d.metadata.links.forEach(link => {
-            media += "\n" + link
+    //     if (d.metadata?.links) {
+    //       d.metadata.links.forEach(link => {
+    //         media += "\n" + link
+    //       })
+    //     }
+ 
+        const context = rankedDocs
+          .map((d, i) => {
+            return `[Source ${i+1}]
+        ${d.pageContent}`
           })
-        }
- 
-        return `[Source ${i+1}]
-        ${d.pageContent}
-        ${media}`
- 
-      })
-      .join("\n\n")
+          .join("\n\n")
  
     /* Step 4: Build Prompt */
  
@@ -329,7 +332,7 @@ Answer:
 //    const response = await llm.invoke(prompt);
 const response = await invokeWithRetry(llm, prompt);
  
-let cleanText = response.content
+let cleanText = response?.content || ""
  
 cleanText = cleanText.replace(/\[Source\s*\d+\]/gi,'')
 cleanText = cleanText.replace(/\*/g,'')
@@ -337,6 +340,21 @@ cleanText = cleanText.replace(/\n\s*\n/g,'\n')
 cleanText = cleanText.trim()
  
 let answer = convertMedia(cleanText)
+// Detect person name from answer
+let detectedPerson = null
+
+// detect name from QUESTION first
+const questionName = question.match(/\b[A-Z][a-z]+\s[A-Z][a-z]+\b/)
+
+if (questionName) {
+  detectedPerson = questionName[0].toLowerCase()
+} else {
+  // fallback to answer
+  const answerName = cleanText.match(/\b[A-Z][a-z]+\s[A-Z][a-z]+\b/)
+  if (answerName) {
+    detectedPerson = answerName[0].toLowerCase()
+  }
+}
 // extract important words from the answer
 const answerKeywords = cleanText
   .toLowerCase()
@@ -368,46 +386,52 @@ if (cleanText.toLowerCase().includes("don't have enough information")) {
 let images = []
 let videos = []
 let links = []
- 
-rankedDocs.forEach(d => {
- 
-  const text = d.pageContent.toLowerCase()
- 
-  const relevant = answerKeywords.some(k => text.includes(k))
- 
-  if (!relevant) return
- 
-  if (d.metadata?.image_url && d.metadata.image_url.startsWith("http")) {
-    images.push({ url: d.metadata.image_url })
-  }
- 
-  if (d.metadata?.video_url) {
-    videos.push({ url: d.metadata.video_url })
-  }
- 
-  if (d.metadata?.links) {
- 
-  const text = d.pageContent.toLowerCase()
- 
-  // extract meaningful keywords from question
-  const keywords = question
+
+
+
+  const questionWords = question
     .toLowerCase()
     .replace(/[^\w\s]/g,"")
     .split(" ")
     .filter(w => w.length > 3)
- 
-  const match = keywords.some(k => text.includes(k))
- 
-  if (match) {
+
+  rankedDocs.forEach(d => {
+
+  const text = d.pageContent.toLowerCase()
+
+  const answerMatch = answerKeywords.some(k => text.includes(k))
+  const questionMatch = questionWords.some(q => text.includes(q))
+
+  let personMatch = true
+
+  // Only apply person filtering if NOT a list query
+  if (detectedPerson && !isListQuery) {
+    const nameParts = detectedPerson.split(" ")
+personMatch = nameParts.every(n => text.includes(n))
+  }
+
+  const relevant = isListQuery
+  ? answerMatch
+  : answerMatch && questionMatch && personMatch
+
+  if (!relevant) return
+
+  if (d.metadata?.image_url && d.metadata.image_url.startsWith("http")) {
+    images.push({ url: d.metadata.image_url })
+  }
+
+  if (d.metadata?.video_url) {
+    videos.push({ url: d.metadata.video_url })
+  }
+
+  if (d.metadata?.links) {
     d.metadata.links.forEach(link => {
       links.push({ url: link })
     })
   }
- 
-}
- 
+
 })
- 
+
 images = [...new Map(images.map(i => [i.url, i])).values()]
 videos = [...new Map(videos.map(i => [i.url, i])).values()]
 links = [...new Map(links.map(i => [i.url, i])).values()]
