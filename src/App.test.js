@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
-import App from './App';
+import App from './App.js';
 
-test('renders learn react link', () => {
+test('renders InsightHost activation screen', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  expect(screen.getAllByText(/Insight/i).length).toBeGreaterThan(0);
+  expect(screen.getByText(/tap anywhere to activate/i)).toBeInTheDocument();
 });

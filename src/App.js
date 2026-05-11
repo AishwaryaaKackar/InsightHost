@@ -13,12 +13,20 @@ const BrightSoftwareHost = () => {
   const isConversingRef = useRef(false); 
   const isAISpeakingRef = useRef(false);
   const mediaActiveRef = useRef(false); // Ref for immediate sync
-  const synthRef = window.speechSynthesis;
+  const synthRef = window.speechSynthesis || {
+    getVoices: () => [],
+    speak: () => {},
+    cancel: () => {}
+  };
   const chatEndRef = useRef(null);
   const currentUtteranceRef = useRef(null);
   const ACCION_RED = "#E31E24";
   const GLOW_CYAN = "#00FFFF";
   const GLOW_BLUE = "#3B82F6";
+  const cleanResponseText = (text = "") => text
+    .replace(/\s*\[Source\s*\d+\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
   const CATEGORY_DATA = [
   { 
     name: 'Our services', 
@@ -140,10 +148,14 @@ const BrightSoftwareHost = () => {
   }, [isWaked]);
 
   const handleTurn = async (text, localMedia = null) => {
+  console.log("🎤 USER SAID:", text);
+  console.log("🟡 Starting handleTurn");
   isAISpeakingRef.current = true;
   recognitionRef.current?.stop();
+  console.log("🛑 Recognition stopped");
 
   setStatus('PROCESSING...');
+  console.log("🟡 Status set to PROCESSING");
   setInterimText('');
 
   // 1. Add the User's message to chat
@@ -179,7 +191,8 @@ const BrightSoftwareHost = () => {
         body: JSON.stringify({ question: text })
       });
       const data = await res.json();
-      botMessage.content = data.response || "";
+      console.log("📦 Parsed response:", data);
+      botMessage.content = cleanResponseText(data.response || "");
       botMessage.images = data.images || [];
       botMessage.videos = data.videos || [];
       botMessage.links = data.links || [];
@@ -205,7 +218,7 @@ const BrightSoftwareHost = () => {
     voices.find(v => v.name.includes('Microsoft Aria')) ||
     voices[0];
   // 🔥 Split into chunks
-  const chunks = text.match(/.{1,120}(\s|$)/g); // 120 chars per chunk
+const chunks = text.match(/.{1,220}(\s|$)/g);// 120 chars per chunk
   let index = 0;
   const speakChunk = () => {
 
@@ -374,50 +387,108 @@ const prompts = {
 
       {isChatVisible ? (
         <div className="chat-window">
-          {chat.map((msg, i) => (
-            <div key={i} className={`bubble ${msg.role === 'user' ? 'user-bubble' : 'ai-bubble'}`}>
+          {chat.map((msg, i) => {
+            const hasMedia = msg.role === 'assistant' && (
+              (msg.images && msg.images.length > 0) ||
+              (msg.videos && msg.videos.length > 0)
+            );
+
+            return (
+            <div key={i} className={`bubble ${msg.role === 'user' ? 'user-bubble' : 'ai-bubble'}`} style={hasMedia ? { maxWidth: '95%', width: '95%' } : undefined}>
               <div style={{ fontSize: '10px', opacity: 0.6, marginBottom: '4px', fontWeight: 800 }}>
                  {msg.role === 'user' ? 'YOU' : 'INSIGHT HOST'}
               </div>
               
-              {msg.content && (
-                <div style={{ marginBottom: '8px', lineHeight: '1.5' }}>
-                  {msg.content}
-                </div>
-              )}
+              <div
+                  style={
+                    hasMedia
+                      ? {
+                          display: "flex",
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: "18px",
+                          width: "100%"
+                        }
+                      : undefined
+                  }
+                >
+                {msg.content && (
+                  <div
+                    style={{
+                      marginBottom: hasMedia ? 0 : "8px",
+                      lineHeight: "1.5",
+                      flex: 1,
+                      minWidth: 0
+                    }}
+                  >
+                    {msg.content}
+                  </div>
+                )}
 
-              {msg.images && msg.images.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '8px' }}>
-                  {msg.images.map((img, idx) => (
-                    <img key={idx} src={img.url} alt="Insight" style={{ width: '100%', borderRadius: '10px', objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(img.url, '_blank')} />
-                  ))}
-                </div>
-              )}
-
-              {msg.videos && msg.videos.length > 0 && (
-                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {msg.videos.map((vid, idx) => (
-                    <div key={idx}>
-                      {vid.type === "youtube" ? (
-                        <>
-                          <iframe src={vid.url} style={{ width: '100%', height: '300px', borderRadius: '10px' }} frameBorder="0" allowFullScreen title="YouTube video" />
-                          {/* 🔥 UI logic fix: YouTube needs a manual resume button because it doesn't trigger JS events */}
-                          <button 
-                            onClick={() => toggleMediaMic(!mediaActive)}
-                            style={{ width: '100%', marginTop: '8px', padding: '10px', borderRadius: '8px', background: mediaActive ? GLOW_CYAN : 'rgba(255,255,255,0.1)', color: mediaActive ? 'black' : 'white', border: 'none', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                          >
-                            {mediaActive ? "✅ TAP TO RESUME LISTENING" : "🔇 TAP TO MUTE MIC WHILE WATCHING"}
-                          </button>
-                        </>
-                      ) : (
-                        <video controls style={{ width: '100%', borderRadius: '10px' }} onPlay={() => toggleMediaMic(true)} onPause={() => toggleMediaMic(false)} onEnded={() => toggleMediaMic(false)}>
-                          <source src={vid.url} type="video/mp4" />
-                        </video>
-                      )}
+                <div
+                  style={{
+                    width: "260px",
+                    minWidth: "260px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px"
+                  }}
+                >
+                  {msg.images && msg.images.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          msg.images.length > 1 ? "1fr 1fr" : "1fr",
+                        gap: "10px"
+                      }}
+                    >
+                      {msg.images.map((img, idx) => (
+                        <img
+                          key={idx}
+                          src={img.url}
+                          alt="Insight"
+                          onClick={() => window.open(img.url, "_blank")}
+                          style={{
+                            width: "100%",
+                            height: "220px",
+                            borderRadius: "12px",
+                            objectFit: "cover",
+                            cursor: "pointer",
+                            border: "1px solid rgba(255,255,255,0.1)"
+                          }}
+                        />
+                      ))}
                     </div>
-                  ))}
+                  )}
+
+                  {msg.videos && msg.videos.length > 0 && (
+                    <div style={{ marginTop: msg.images && msg.images.length > 0 ? '10px' : 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {msg.videos.map((vid, idx) => (
+                        <div key={idx}>
+                          {vid.type === "youtube" ? (
+                            <>
+                              <iframe src={vid.url} style={{ width: '100%', height: '240px', borderRadius: '10px' }} frameBorder="0" allowFullScreen title="YouTube video" />
+                              {/* 🔥 UI logic fix: YouTube needs a manual resume button because it doesn't trigger JS events */}
+                              <button 
+                                onClick={() => toggleMediaMic(!mediaActive)}
+                                style={{ width: '100%', marginTop: '8px', padding: '10px', borderRadius: '8px', background: mediaActive ? GLOW_CYAN : 'rgba(255,255,255,0.1)', color: mediaActive ? 'black' : 'white', border: 'none', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                              >
+                                {mediaActive ? "✅ TAP TO RESUME LISTENING" : "🔇 TAP TO MUTE MIC WHILE WATCHING"}
+                              </button>
+                            </>
+                          ) : (
+                            <video controls style={{ width: '100%', borderRadius: '10px' }} onPlay={() => toggleMediaMic(true)} onPause={() => toggleMediaMic(false)} onEnded={() => toggleMediaMic(false)}>
+                              <source src={vid.url} type={vid.mimeType || "video/mp4"} />
+                            </video>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               {msg.links && msg.links.length > 0 && (
                 <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -429,7 +500,7 @@ const prompts = {
                 </div>
               )}
             </div>
-          ))}
+          )})}
           {interimText && (
             <div className="bubble user-bubble" style={{ opacity: 0.5 }}>
                 <div style={{ fontSize: '10px', fontWeight: 800 }}>YOU (Listening...)</div>
